@@ -46,6 +46,7 @@ Please refer to the [demo/results](demo/results) folder.
 | mass            | mass for the adduct form      |
 | ccs_avg         | an average of CCS values of same adducts for all the replicates |
 | ccs_rsd         | a relative stdv of CCS values of same adducts for all the replicates |
+| ccs             | a CCS value of this adduct for this replicate |
 | intensity_org_# | original intensity of a corresponding feature in #th field      |
 | intensity_z_#   | z-score of an intensity of a corresponding feature in #th field      |
 | mass_error_#    | mass error of a corresponding feature in #th field (ppm)      |
