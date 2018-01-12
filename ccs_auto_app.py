@@ -45,7 +45,7 @@ def etree_to_dict(t):
     d['tag'] = t.tag
     return d
 
-def get_metadata(mfile, offset):
+def get_metadata(mfile, offset, ax=None, label=None):
     '''read metadata file and extract the field information for each frame
     TODO: offset method (choose one frame by offset) or average in a range
     Return
@@ -53,7 +53,22 @@ def get_metadata(mfile, offset):
     '''
     metadata = pd.read_csv(mfile, sep='\t')
     _list = list(metadata.drop_duplicates(subset='FrameMethodId').FrameId+offset-1)
-    return metadata[metadata.FrameId.isin(_list)]
+    filtered = metadata[metadata.FrameId.isin(_list)]
+    ##################################################
+    if ax is not None:
+        ax[0].plot(metadata.FrameId, metadata.ImsTemperature, label=label)
+        ax[0].scatter(filtered.FrameId, filtered.ImsTemperature, label=None)
+        ax[0].set_ylabel('Temperature (C)')
+        ax[1].plot(metadata.FrameId, metadata.ImsPressure)
+        ax[1].scatter(filtered.FrameId, filtered.ImsPressure)
+        ax[1].set_ylabel('Pressure (torr)')
+        ax[2].plot(metadata.FrameId, metadata.ImsField)
+        ax[2].scatter(filtered.FrameId, filtered.ImsField)
+        ax[2].set_ylabel('E (V/cm)')
+        ax[2].set_xlabel('Frame ID')
+    ##################################################
+
+    return filtered
 
 def get_target_info(target_list_file):
     '''read the target_list_file
@@ -197,20 +212,8 @@ def get_ccs(comp_id, target_list, config_params):
             fname = FLAGS.data_folder + '/' + rep_file.rsplit('.', 1)[0]
             meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
             
-
-
-            metadata = get_metadata(meta_file, config_params['frame_offset'])
+            metadata = get_metadata(meta_file, config_params['frame_offset'], ax=axis['meta'], label=rep_file)
             
-            ##################################################
-            axis['meta'][0].plot(metadata.FrameId, metadata.ImsTemperature, label=rep_file)
-            axis['meta'][0].set_ylabel('Temperature (C)')
-            axis['meta'][1].plot(metadata.FrameId, metadata.ImsPressure)
-            axis['meta'][1].set_ylabel('Pressure (torr)')
-            axis['meta'][2].plot(metadata.FrameId, metadata.ImsField)
-            axis['meta'][2].set_ylabel('E (V/cm)')
-            axis['meta'][2].set_xlabel('Frame ID')
-            ##################################################
-
             for step in range(config_params['num_fields']):
                 cef_file = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
                 _features, _ = get_features_from_cef(cef_file)
