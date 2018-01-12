@@ -1,0 +1,7 @@
+CompID	NeutralName	CAS	Formula	ExactMass	Ionization	RawFileName
+S0000001	Sucrose	57-50-1	C12H22O11	342.1162062	pos	CCS_Pos-1_57-50-1_30Jun16_Beech_Infuse.d
+						CCS_Pos-2_57-50-1_30Jun16_Beech_Infuse.d
+						CCS_Pos-3_57-50-1_5Jul16_Beech_Infuse.d
+S0000001	Sucrose	57-50-1	C12H22O11	342.1162062	neg	CCS_Neg-1_57-50-1_7Jul16_Beech_Infuse.d
+						CCS_Neg-2_57-50-1_7Jul16_Beech_Infuse.d
+						CCS_Neg-3_57-50-1_7Jul16_Beech_Infuse.d

@@ -25,5 +25,5 @@ optional arguments:
 
 ## Example
 ```bash
-python ccs_auto_app.py --target_list_file CCS-DB-Automation_workshop/TargetList.tsv --config_file CCS-DB-Automation_workshop/config.xml --data_folder CCS-DB-Automation_workshop/cef-and-metadata
+python ccs_auto_app.py --target_list_file demo/TargetList.tsv --config_file demo/config.xml --data_folder demo/data
 ```

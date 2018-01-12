@@ -192,73 +192,80 @@ def get_ccs(comp_id, target_list, config_params):
     ##################################################
 
     # compute CCS for each replicate
-    for r, rep_file in enumerate(rep_files):
-        fname = FLAGS.data_folder + '/' + rep_file.rsplit('.', 1)[0]
-        meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
-        metadata = get_metadata(meta_file, config_params['frame_offset'])
-        
-        ##################################################
-        axis['meta'][0].plot(metadata.FrameId, metadata.ImsTemperature, label=rep_file)
-        axis['meta'][0].set_ylabel('Temperature (C)')
-        axis['meta'][1].plot(metadata.FrameId, metadata.ImsPressure)
-        axis['meta'][1].set_ylabel('Pressure (torr)')
-        axis['meta'][2].plot(metadata.FrameId, metadata.ImsField)
-        axis['meta'][2].set_ylabel('E (V/cm)')
-        axis['meta'][2].set_xlabel('Frame ID')
-        ##################################################
-
-        for step in range(config_params['num_fields']):
-            cef_file = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
-            _features, _ = get_features_from_cef(cef_file)
-            _features['frame'] = np.ones(_features.shape[0], dtype=np.int32) * (step+1)
-            if step == 0:
-                features = _features
-            else:
-                features = features.append(_features)
+    try:
+        for r, rep_file in enumerate(rep_files):
+            fname = FLAGS.data_folder + '/' + rep_file.rsplit('.', 1)[0]
+            meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
             
-            ## draw m/z vs intensity
-            ax = axis['intdist'][step, r]
-            plot_intensity_distribution(_features, adducts, ax, config_params['mz_tolerance'])
-            ax.set_xlim([0, np.log(3e6)])
-        
-        # compute CCS for each adducts
-        for adduct in adducts:
-            adduct_mass = adducts[adduct]
-            ccs_features = find_features(features, metadata, adduct_mass, config_params['mz_tolerance'])
-            if ccs_features.shape[0] > 0:
-                ccs_property = compute(ccs_features, adduct_mass, config_params)
-                print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_property['ccs']))
-                tokens = comp_id.split('_')
-                ccs_property['Compound_id'] = tokens[0]
-                ccs_property['Ionization'] = tokens[1]
-                ccs_property['adduct'] = adduct
-                ccs_property['replicate'] = rep_file
-                ccs_property['name'] = list(target_info.NeutralName)[0]
-                ccs_property['num_features'] = ccs_features.shape[0]
-                for feature in ccs_features.itertuples():
-                    ccs_property['intensity_org_' + str(feature.frame)] = feature.intensity_org
-                    ccs_property['intensity_z_' + str(feature.frame)] = feature.intensity_z
-                    ccs_property['mass_error_' + str(feature.frame)] = mass_error(feature.mass, adduct_mass)
-                ccs_results.append(ccs_property)
-                ##################################################
-                plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file)
-                is_filled[adduct] = True
-                ##################################################
-    
-    ##################################################                
-    for adduct in adducts:
-        if is_filled[adduct]:
-            figs[adduct].tight_layout()
-            figs[adduct].savefig(comp_id+"_"+adduct+".pdf", dpi=300)
-    
-    axis['meta'][0].legend()
-    figs['meta'].tight_layout()
-    figs['meta'].savefig(comp_id+"_meta.pdf", dpi=300)
-    
-    figs['intdist'].tight_layout()
-    figs['intdist'].savefig(comp_id+'_intensity_dist.pdf')
 
-    ##################################################
+
+            metadata = get_metadata(meta_file, config_params['frame_offset'])
+            
+            ##################################################
+            axis['meta'][0].plot(metadata.FrameId, metadata.ImsTemperature, label=rep_file)
+            axis['meta'][0].set_ylabel('Temperature (C)')
+            axis['meta'][1].plot(metadata.FrameId, metadata.ImsPressure)
+            axis['meta'][1].set_ylabel('Pressure (torr)')
+            axis['meta'][2].plot(metadata.FrameId, metadata.ImsField)
+            axis['meta'][2].set_ylabel('E (V/cm)')
+            axis['meta'][2].set_xlabel('Frame ID')
+            ##################################################
+
+            for step in range(config_params['num_fields']):
+                cef_file = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
+                _features, _ = get_features_from_cef(cef_file)
+                _features['frame'] = np.ones(_features.shape[0], dtype=np.int32) * (step+1)
+                if step == 0:
+                    features = _features
+                else:
+                    features = features.append(_features)
+                
+                ## draw m/z vs intensity
+                ax = axis['intdist'][step, r]
+                plot_intensity_distribution(_features, adducts, ax, config_params['mz_tolerance'])
+                ax.set_xlim([0, np.log(3e6)])
+            
+            # compute CCS for each adducts
+            for adduct in adducts:
+                adduct_mass = adducts[adduct]
+                ccs_features = find_features(features, metadata, adduct_mass, config_params['mz_tolerance'])
+                if ccs_features.shape[0] > 0:
+                    ccs_property = compute(ccs_features, adduct_mass, config_params)
+                    print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_property['ccs']))
+                    tokens = comp_id.split('_')
+                    ccs_property['Compound_id'] = tokens[0]
+                    ccs_property['Ionization'] = tokens[1]
+                    ccs_property['adduct'] = adduct
+                    ccs_property['replicate'] = rep_file
+                    ccs_property['name'] = list(target_info.NeutralName)[0]
+                    ccs_property['num_features'] = ccs_features.shape[0]
+                    for feature in ccs_features.itertuples():
+                        ccs_property['intensity_org_' + str(feature.frame)] = feature.intensity_org
+                        ccs_property['intensity_z_' + str(feature.frame)] = feature.intensity_z
+                        ccs_property['mass_error_' + str(feature.frame)] = mass_error(feature.mass, adduct_mass)
+                    ccs_results.append(ccs_property)
+                    ##################################################
+                    plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file)
+                    is_filled[adduct] = True
+                    ##################################################
+        
+        ##################################################                
+        for adduct in adducts:
+            if is_filled[adduct]:
+                figs[adduct].tight_layout()
+                figs[adduct].savefig(comp_id+"_"+adduct+".pdf", dpi=300)
+        
+        axis['meta'][0].legend()
+        figs['meta'].tight_layout()
+        figs['meta'].savefig(comp_id+"_meta.pdf", dpi=300)
+        
+        figs['intdist'].tight_layout()
+        figs['intdist'].savefig(comp_id+'_intensity_dist.pdf')
+
+        ##################################################
+    except Exception as e:
+        print(e + ': Please check out target_list_file.')
+    
     return ccs_results
             
 def compute(df, ion_mz, config_params):
@@ -267,10 +274,6 @@ def compute(df, ion_mz, config_params):
     params = {}
     params['temp'] = df.ImsTemperature.tolist()
     params['pressures'] = df.ImsPressure.tolist()
-    # params['voltages'] = sheet_e
-    # params['voltages'] = drift_tube_length * np.array(sheet_v)
-    # params['arrival_time'] = sheet_dt
-    # params['voltages'] = (df.ImsField*drift_tube_length).tolist()
     params['voltages'] = (df.ImsField*config_params['old_drift_tube_length']).tolist()  ## 10.869 * (78.12 / 78.236) = 10.853 for correction
     params['arrival_time'] = df.dt.tolist()
     params['neutral_mass'] = config_params['neutral_mass']
@@ -328,13 +331,6 @@ def plot_intensity_distribution(features, adducts_mass, ax, ppm=50):
     ax.set_xlabel('log(Intensity)')
     ax.set_ylabel('Density')
 
-# def plot_mz_error_intensity(features, adducts_mass, ax, ppm=50):
-#     colors = get_pos_adducts_colors()
-#     ax.scatter(features.mass, features.intensity, c='k', alpha=0.2, s=3)
-#     for adduct in adducts_mass:
-#         sel = features[is_in_tolerance(features.mass, adducts_mass[adduct], ppm)]
-#         if sel.shape[0] > 0:
-#             ax.scatter(sel['mass'], sel['intensity'], c=colors[adduct])
 
 def report(ccs_table, target_list):
     def get_stats(group):
