@@ -1,7 +1,7 @@
 # Step Field CCS Automation Package
 This python package aims to find reliable features and compute the CCS values for chemical standards. It is assumed that prior to running this software you have: 
 * preprocessed the raw data files and each of the seven fields is split into a separate file.  
-* obtained the correspondent features from Agilent's MP software into a CEF file from eac field.
+* obtained the correspondent features from Agilent's MP software (a CEF file from each field).
 
 ## How to install python packages for this app.
 ```bash
