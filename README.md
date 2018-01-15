@@ -1,7 +1,7 @@
 # Step Field CCS Automation Package
 This python package aims to find reliable features and compute the CCS values for chemical standards. It is assumed that prior to running this software you have: 
-* preprocessed the raw data files and each of the seven fields is split into a separate file.  
-* obtained the correspondent features from Agilent's MP software (a CEF file from each field).
+* preprocessed the raw data files and each of the seven fields is split into a separate file (https://omics.pnl.gov/software/pnnl-preprocessor)
+* obtained the correspondent features from Agilent's MP software (a CEF file from each field)
 
 ## How to install python packages for this app.
 ```bash
@@ -26,7 +26,7 @@ optional arguments:
 ```
 
 ## Demo
-You can test this package with a sample data. 
+You can test this package with a subset of standards from the PNNL CCS DB found at https://panomics.pnnl.gov/metabolites/
 
 ## How to run
 ```bash
