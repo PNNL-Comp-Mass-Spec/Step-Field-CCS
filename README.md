@@ -26,7 +26,7 @@ optional arguments:
 ```
 
 ## Demo
-You can test this package with a subset of standards from the PNNL CCS DB found at https://panomics.pnnl.gov/metabolites/
+You can test this package with the CEF files here included. This is a subset of the standards from the PNNL CCS DB found at https://panomics.pnnl.gov/metabolites/
 
 ## How to run
 ```bash
