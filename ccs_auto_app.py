@@ -7,6 +7,8 @@ import glob
 import seaborn as sns
 from compute_ccs import SteppedFieldCCS
 
+import time
+
 import argparse
 
 ##########################################################################
@@ -36,6 +38,11 @@ FLAGS = {}
 ##########################################################################
 # 
 ##########################################################################
+
+##########################################################################
+# 
+##########################################################################
+
 def etree_to_dict(t):
     '''convert XML tree to json format
     '''
@@ -187,6 +194,8 @@ def get_ccs(comp_id, target_list, config_params):
     '''
     ccs_results = []
 
+    time_for_feature_finding = 0
+
     target_info = target_list[target_list.ID==comp_id]
     rep_files = list(target_info.RawFileName)
     rep_files.sort()
@@ -203,7 +212,7 @@ def get_ccs(comp_id, target_list, config_params):
         figs[adduct], axis[adduct] = plt.subplots(num_reps, sharex=True, sharey=True, figsize=(8,8))
         is_filled[adduct] = False
     figs['meta'], axis['meta'] = plt.subplots(3, sharex=True, sharey=False, figsize=(8,8))
-    figs['intdist'], axis['intdist'] = plt.subplots(config_params['num_fields'], len(rep_files), sharex=True, sharey=False, figsize=(20,14))
+    figs['intdist'], axis['intdist'] = plt.subplots(config_params['num_fields'], num_reps, sharex=True, sharey=False, figsize=(20,14))
     ##################################################
 
     # compute CCS for each replicate
@@ -224,14 +233,20 @@ def get_ccs(comp_id, target_list, config_params):
                     features = features.append(_features)
                 
                 ## draw m/z vs intensity
-                ax = axis['intdist'][step, r]
+                if num_reps == 1:
+                    ax = axis['intdist'][step]
+                else:
+                    ax = axis['intdist'][step, r]
                 plot_intensity_distribution(_features, adducts, ax, config_params['mz_tolerance'])
                 ax.set_xlim([0, np.log(3e6)])
             
             # compute CCS for each adducts
+
             for adduct in adducts:
                 adduct_mass = adducts[adduct]
+                start_time = time.time()
                 ccs_features = find_features(features, metadata, adduct_mass, config_params['mz_tolerance'])
+                time_for_feature_finding += (time.time() - start_time)
                 if ccs_features.shape[0] > 0:
                     ccs_property = compute(ccs_features, adduct_mass, config_params)
                     print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_property['ccs']))
@@ -241,6 +256,7 @@ def get_ccs(comp_id, target_list, config_params):
                     ccs_property['adduct'] = adduct
                     ccs_property['replicate'] = rep_file
                     ccs_property['name'] = list(target_info.NeutralName)[0]
+                    ccs_property['CAS'] = list(target_info.CAS)[0]
                     ccs_property['num_features'] = ccs_features.shape[0]
                     for feature in ccs_features.itertuples():
                         ccs_property['intensity_org_' + str(feature.frame)] = feature.intensity_org
@@ -248,7 +264,10 @@ def get_ccs(comp_id, target_list, config_params):
                         ccs_property['mass_error_' + str(feature.frame)] = mass_error(feature.mass, adduct_mass)
                     ccs_results.append(ccs_property)
                     ##################################################
-                    plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file)
+                    if num_reps == 1:
+                        plot_ccs_regression_lines(axis[adduct], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file)
+                    else:
+                        plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file)
                     is_filled[adduct] = True
                     ##################################################
         
@@ -267,8 +286,8 @@ def get_ccs(comp_id, target_list, config_params):
 
         ##################################################
     except Exception as e:
-        print(e + ': Please check out target_list_file.')
-    
+        print ("ERROR: {0} ({1})".format(e.strerror, rep_file))
+    # print('Total time for feature finding: {0} sec/compound(e.g., 3 reps and 6 adducts)'.format(time_for_feature_finding))
     return ccs_results
             
 def compute(df, ion_mz, config_params):
@@ -337,7 +356,7 @@ def plot_intensity_distribution(features, adducts_mass, ax, ppm=50):
 
 def report(ccs_table, target_list):
     def get_stats(group):
-        return {'ccs_avg': group.mean(), 'ccs_rsd': 100*group.std()/group.mean()}
+        return {'ccs_avg': group.mean(), 'ccs_rsd': 100*group.std()/group.mean(), 'ccs_count': group.count()}
     
     ccs_avg = ccs_table.groupby(['Compound_id', 'adduct'])['ccs'].apply(get_stats).unstack()
     print(ccs_avg.reset_index())
@@ -362,11 +381,11 @@ def main():
     target_list = pd.read_csv(FLAGS.target_list_file, sep='\t')
     target_list['ID']= target_list.CompID.str.cat("_"+target_list.Ionization)
     
-    num_comp = np.sum(target_list.CompID.notnull())
-    num_pos = np.sum(target_list.Ionization=='pos')
-    num_neg = np.sum(target_list.Ionization=='neg')
-
     target_list = target_list.fillna(method='ffill')
+
+    num_comp = list(pd.DataFrame(target_list.CompID.str.split('\.').tolist(), columns = ['CompID','ver']).CompID.drop_duplicates())
+    num_pos = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.split('_').tolist(), columns = ['id','ion']).ion=='pos')
+    num_neg = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.split('_').tolist(), columns = ['id','ion']).ion=='neg')
 
     # read a set of configuration parameters
     config_params = get_config(FLAGS.config_file)
@@ -376,13 +395,15 @@ def main():
     assert len(compound_ids) == num_pos+num_neg,\
         "Please check if there are duplicates in CompID and its Ionization"
 
-    cids = list(target_list.CompID.drop_duplicates())
-    print('Number of compounds: {0} (pos:{1},neg:{2})'.format(len(cids), num_pos, num_neg))
+    print('Number of compounds: {0} (pos:{1},neg:{2})'.format(len(num_comp), num_pos, num_neg))
     
     ccs_results = []
+    start_time = time.time()
     for comp_id in compound_ids:
         # compute ccs for this compound
         ccs_results += get_ccs(comp_id, target_list, config_params)
+        print('[{0}] {1} sec'.format(comp_id, (time.time()-start_time)))
+    print('Total time: {0} sec/compound(e.g., 3 reps)'.format((time.time()-start_time)/len(compound_ids)))
     ccs_table = pd.DataFrame(ccs_results)
     report(ccs_table, target_list)
 
