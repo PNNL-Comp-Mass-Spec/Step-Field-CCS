@@ -383,7 +383,9 @@ def main():
     
     target_list = target_list.fillna(method='ffill')
 
-    num_comp = list(pd.DataFrame(target_list.CompID.str.split('\.').tolist(), columns = ['CompID','ver']).CompID.drop_duplicates())
+    ## e.g., S00001.b if you have a same compound id but different versions.
+    # num_comp = list(pd.DataFrame(target_list.CompID.str.split('\.').tolist(), columns = ['CompID','ver']).CompID.drop_duplicates())
+    num_comp = list(target_list.CompID.drop_duplicates())
     num_pos = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.split('_').tolist(), columns = ['id','ion']).ion=='pos')
     num_neg = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.split('_').tolist(), columns = ['id','ion']).ion=='neg')
 
