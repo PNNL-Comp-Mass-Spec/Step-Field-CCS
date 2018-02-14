@@ -182,6 +182,11 @@ def mass_error(x, mass):
 
 def find_features(features, metadata, ion_mz, ppm):
     df = features[is_in_tolerance(features.mass, ion_mz, ppm)]
+    if df.shape[0] == 0: return df
+    
+    #  if 'frame' column in metadata, delete it
+    if 'frame' in metadata.columns: del metadata['frame']
+
     df = df.sort_values(by='intensity_z').drop_duplicates(subset='frame', keep='last')
     df = df.merge(metadata, left_on='frame', right_on='FrameMethodId', how='inner')
     df = df.sort_values(by='frame')
@@ -250,7 +255,7 @@ def get_ccs(comp_id, target_list, config_params):
                 if ccs_features.shape[0] > 0:
                     ccs_property = compute(ccs_features, adduct_mass, config_params)
                     print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_property['ccs']))
-                    tokens = comp_id.split('_')
+                    tokens = comp_id.rsplit('_', 1)
                     ccs_property['Compound_id'] = tokens[0]
                     ccs_property['Ionization'] = tokens[1]
                     ccs_property['adduct'] = adduct
@@ -265,9 +270,9 @@ def get_ccs(comp_id, target_list, config_params):
                     ccs_results.append(ccs_property)
                     ##################################################
                     if num_reps == 1:
-                        plot_ccs_regression_lines(axis[adduct], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file)
+                        plot_ccs_regression_lines(axis[adduct], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file, drift_tube_length=config_params['drift_tube_length'])
                     else:
-                        plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file)
+                        plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file, drift_tube_length=config_params['drift_tube_length'])
                     is_filled[adduct] = True
                     ##################################################
         
@@ -386,8 +391,8 @@ def main():
     ## e.g., S00001.b if you have a same compound id but different versions.
     # num_comp = list(pd.DataFrame(target_list.CompID.str.split('\.').tolist(), columns = ['CompID','ver']).CompID.drop_duplicates())
     num_comp = list(target_list.CompID.drop_duplicates())
-    num_pos = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.split('_').tolist(), columns = ['id','ion']).ion=='pos')
-    num_neg = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.split('_').tolist(), columns = ['id','ion']).ion=='neg')
+    num_pos = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.rsplit('_',1).tolist(), columns = ['id','ion']).ion=='pos')
+    num_neg = np.sum(pd.DataFrame(target_list.ID.drop_duplicates().str.rsplit('_',1).tolist(), columns = ['id','ion']).ion=='neg')
 
     # read a set of configuration parameters
     config_params = get_config(FLAGS.config_file)
