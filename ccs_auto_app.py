@@ -202,7 +202,7 @@ def find_features(features, metadata, ion_mz, ppm):
     # df = df.sort_values(by='intensity_z').drop_duplicates(subset='frame', keep='last')
     df = df.merge(metadata, left_on='frame', right_on='FrameMethodId', how='inner')
     # df = df.sort_values(by='frame')
-    df.to_csv("test_{0:.5f}.txt".format(ion_mz),sep="\t")
+    # df.to_csv("test_{0:.5f}.txt".format(ion_mz),sep="\t")
     return df
 
 def get_ccs(comp_id, target_list, config_params):
