@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import glob
 import seaborn as sns
 from compute_ccs import SteppedFieldCCS
-
+from shortest_for_ccs import get_possible_ccs_values
 import time
 
 import argparse
@@ -180,7 +180,7 @@ def is_in_tolerance(x, mass, ppm):
 def mass_error(x, mass):
     return abs(x - mass) / mass * 1e6
 
-def find_features(features, metadata, ion_mz, ppm):
+def find_features_maxint(features, metadata, ion_mz, ppm):
     df = features[is_in_tolerance(features.mass, ion_mz, ppm)]
     if df.shape[0] == 0: return df
     
@@ -190,6 +190,19 @@ def find_features(features, metadata, ion_mz, ppm):
     df = df.sort_values(by='intensity_z').drop_duplicates(subset='frame', keep='last')
     df = df.merge(metadata, left_on='frame', right_on='FrameMethodId', how='inner')
     df = df.sort_values(by='frame')
+    return df
+
+def find_features(features, metadata, ion_mz, ppm):
+    df = features[is_in_tolerance(features.mass, ion_mz, ppm)]
+    if df.shape[0] == 0: return df
+    
+    #  if 'frame' column in metadata, delete it
+    if 'frame' in metadata.columns: del metadata['frame']
+
+    # df = df.sort_values(by='intensity_z').drop_duplicates(subset='frame', keep='last')
+    df = df.merge(metadata, left_on='frame', right_on='FrameMethodId', how='inner')
+    # df = df.sort_values(by='frame')
+    df.to_csv("test_{0:.5f}.txt".format(ion_mz),sep="\t")
     return df
 
 def get_ccs(comp_id, target_list, config_params):
@@ -246,35 +259,76 @@ def get_ccs(comp_id, target_list, config_params):
                 ax.set_xlim([0, np.log(3e6)])
             
             # compute CCS for each adducts
+            # print(features)
+            # print("features size:", features.shape)
 
             for adduct in adducts:
                 adduct_mass = adducts[adduct]
                 start_time = time.time()
-                ccs_features = find_features(features, metadata, adduct_mass, config_params['mz_tolerance'])
-                time_for_feature_finding += (time.time() - start_time)
-                if ccs_features.shape[0] > 0:
-                    ccs_property = compute(ccs_features, adduct_mass, config_params)
-                    print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_property['ccs']))
-                    tokens = comp_id.rsplit('_', 1)
-                    ccs_property['Compound_id'] = tokens[0]
-                    ccs_property['Ionization'] = tokens[1]
-                    ccs_property['adduct'] = adduct
-                    ccs_property['replicate'] = rep_file
-                    ccs_property['name'] = list(target_info.NeutralName)[0]
-                    ccs_property['CAS'] = list(target_info.CAS)[0]
-                    ccs_property['num_features'] = ccs_features.shape[0]
-                    for feature in ccs_features.itertuples():
-                        ccs_property['intensity_org_' + str(feature.frame)] = feature.intensity_org
-                        ccs_property['intensity_z_' + str(feature.frame)] = feature.intensity_z
-                        ccs_property['mass_error_' + str(feature.frame)] = mass_error(feature.mass, adduct_mass)
-                    ccs_results.append(ccs_property)
-                    ##################################################
-                    if num_reps == 1:
-                        plot_ccs_regression_lines(axis[adduct], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file, drift_tube_length=config_params['drift_tube_length'])
-                    else:
-                        plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file, drift_tube_length=config_params['drift_tube_length'])
-                    is_filled[adduct] = True
-                    ##################################################
+                
+                ccs_features_within_mz = find_features(features, metadata, adduct_mass, config_params['mz_tolerance'])
+                if ccs_features_within_mz.shape[0] > 0:
+                    ccs_list = get_possible_ccs_values(ccs_features_within_mz,
+                                                       adduct_mass,
+                                                       old_drift_tube_length=config_params['old_drift_tube_length'],
+                                                       drift_tube_length=config_params['drift_tube_length'],
+                                                       neutral_mass=28.013,
+                                                       threshold_n_fields=3,
+                                                       threshold_r2=0.99)
+                    if len(ccs_list) > 0:
+                        tokens = comp_id.rsplit('_', 1)
+                        for ccs in ccs_list:
+                            ccs_prop = ccs.to_dict()
+                            print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_prop['ccs']))
+                            ccs_prop['Compound_id'] = tokens[0]
+                            ccs_prop['Ionization'] = tokens[1]
+                            ccs_prop['adduct'] = adduct
+                            ccs_prop['replicate'] = rep_file
+                            ccs_prop['name'] = list(target_info.NeutralName)[0]
+                            ccs_prop['CAS'] = list(target_info.CAS)[0]
+                            ccs_results.append(ccs_prop)
+
+                        if num_reps == 1:
+                            _tmp_ax = axis[adduct]
+                        else:
+                            _tmp_ax = axis[adduct][r]
+
+                        ##################################################
+                        plot_ccs_regression_lines2(
+                            _tmp_ax,
+                            adduct,
+                            adduct_mass,
+                            ccs_features_within_mz,
+                            ccs_list,
+                            title=rep_file,
+                            drift_tube_length=config_params['drift_tube_length'])
+                        is_filled[adduct] = True
+                        ##################################################
+                # ccs_features = find_features_maxint(features, metadata, adduct_mass, config_params['mz_tolerance'])
+                # time_for_feature_finding += (time.time() - start_time)
+                # if ccs_features.shape[0] > 0:
+                #     ccs_property = compute(ccs_features, adduct_mass, config_params)
+                #     print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_property['ccs']))
+                #     tokens = comp_id.rsplit('_', 1)
+                #     ccs_property['Compound_id'] = tokens[0]
+                #     ccs_property['Ionization'] = tokens[1]
+                #     ccs_property['adduct'] = adduct
+                #     ccs_property['replicate'] = rep_file
+                #     ccs_property['name'] = list(target_info.NeutralName)[0]
+                #     ccs_property['CAS'] = list(target_info.CAS)[0]
+                #     ccs_property['num_features'] = ccs_features.shape[0]
+                #     for feature in ccs_features.itertuples():
+                #         ccs_property['intensity_org_' + str(feature.frame)] = feature.intensity_org
+                #         ccs_property['intensity_z_' + str(feature.frame)] = feature.intensity_z
+                #         ccs_property['mass_error_' + str(feature.frame)] = mass_error(feature.mass, adduct_mass)
+                #     ccs_results.append(ccs_property)
+                #     ##################################################
+                #     if num_reps == 1:
+                #         plot_ccs_regression_lines(axis[adduct], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file, drift_tube_length=config_params['drift_tube_length'])
+                #     else:
+                #         plot_ccs_regression_lines(axis[adduct][r], adduct, adduct_mass, ccs_features, ccs_property, title=rep_file, drift_tube_length=config_params['drift_tube_length'])
+                #     is_filled[adduct] = True
+                #     ##################################################
         
         ##################################################                
         for adduct in adducts:
@@ -344,6 +398,53 @@ def plot_ccs_regression_lines(axis, adduct, adduct_mass, df, prop, title, drift_
     axis.set_xlabel('Pressure/Voltages (Torr/V)')
     axis.set_ylabel('Arrival time (ms)')
 
+# def plot_ccs_regression_lines2(axis, adduct, adduct_mass, df, prop, title, drift_tube_length=78.236):
+def plot_ccs_regression_lines2(
+                    axis,
+                    adduct,
+                    adduct_mass,
+                    df,
+                    ccs_list,
+                    title,
+                    drift_tube_length):
+    addmass = adduct_mass
+    color = get_adducts_colors()[adduct]
+
+    p_v = df.ImsPressure / (df.ImsField * drift_tube_length)
+    
+    p_vmax = p_v.max()
+    p_vmin = p_v.min()
+
+    for r in df.itertuples():
+        axis.scatter(r.ImsPressure / (r.ImsField * drift_tube_length), r.dt,
+            # c=color, s=np.log(r.intensity_org), alpha=0.2)
+            c=color, s=1000*r.intensity, alpha=0.2)
+
+    axis.text(0.05, 0.8, '{0} {1:.6f}'.format(adduct, addmass),
+            verticalalignment='bottom', horizontalalignment='left',
+            transform=axis.transAxes,
+            color='k', fontsize=15)
+
+    for ccs in ccs_list:
+        prop = ccs.to_dict()
+        pv = [ccs.pressures[i] / (ccs.fields[i] * drift_tube_length) for i in range(len(ccs.pressures))]
+
+        for i, f in enumerate(ccs.fields):
+            axis.text((pv[i] + (p_vmax - p_vmin)/7), ccs.arrival_time[i],
+                      '{0:.3f}ppm, z_score={1:.2f}'.format(ccs.mass_ppm_error[i], ccs.intensity_z[i]),
+                      color='k', fontsize=10)
+            # axis.scatter(pv[i], ccs.arrival_time[i], s=np.log(ccs.intensity_org[i]), c=color)
+            axis.scatter(pv[i], ccs.arrival_time[i], s=1000*ccs.intensity[i], c=color, alpha=0.8)
+        
+        axis.text(min(pv)-2*(p_vmax - p_vmin)/7, min(ccs.arrival_time)-abs(ccs.arrival_time[0]-ccs.arrival_time[1]),
+            'CCS:{0:.4f}(r2:{1:.5f})'.format(prop['ccs'], prop['r2']),
+            color='r', fontsize=10)
+
+        axis.plot(p_v, 1000 * (prop['intercept'] + prop['slope']*p_v), 'r', label='fitted line')
+    axis.set_title(title)
+    axis.set_xlabel('Pressure/Voltages (Torr/V)')
+    axis.set_ylabel('Arrival time (ms)')
+
 
 def plot_intensity_distribution(features, adducts_mass, ax, ppm=50):
     colors = get_adducts_colors()
@@ -360,6 +461,9 @@ def plot_intensity_distribution(features, adducts_mass, ax, ppm=50):
 
 
 def report(ccs_table, target_list):
+    if ccs_table.shape[0] == 0:
+        print("Unfortunately, we couldn't find any good CCS values.")
+        return
     def get_stats(group):
         return {'ccs_avg': group.mean(), 'ccs_rsd': 100*group.std()/group.mean(), 'ccs_count': group.count()}
     
@@ -367,18 +471,26 @@ def report(ccs_table, target_list):
     print(ccs_avg.reset_index())
     ccs_table = pd.merge(ccs_table, ccs_avg.reset_index(), on=['Compound_id','adduct'], how='left')
     
+    print(ccs_table.head())
     # save to a csv file after reordering the columns
     cols = list(ccs_table.columns)
-    cols.pop(cols.index('ccs_avg'))
-    cols.pop(cols.index('ccs_rsd'))
+    if 'ccs_avg' in cols:
+        cols.pop(cols.index('ccs_avg'))
+    else:
+        ccs_table['ccs_avg'] = np.nan
+    if 'ccs_rsd' in cols:
+        cols.pop(cols.index('ccs_rsd'))
+    else:
+        ccs_table['ccs_rsd'] = np.nan
     cols.pop(cols.index('Compound_id'))
     cols.pop(cols.index('Ionization'))
     cols.pop(cols.index('adduct'))
     cols.pop(cols.index('ccs'))
-    cols.pop(cols.index('mass'))
+    cols.pop(cols.index('adduct_mass'))
     cols.pop(cols.index('name'))
-
-    df = ccs_table[['Compound_id','name','Ionization','adduct','mass','ccs_avg','ccs_rsd','ccs']+cols]
+    newcols = ['Compound_id','name','Ionization','adduct','adduct_mass','ccs_avg','ccs_rsd','ccs']+cols
+    
+    df = ccs_table[newcols]
     df.to_csv(FLAGS.output, sep='\t')
     
 def main():
