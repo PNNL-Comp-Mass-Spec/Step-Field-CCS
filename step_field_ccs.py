@@ -22,19 +22,28 @@ class SteppedFieldCCS:
         # self.neutral_mass = params['neutral_mass']
         self._metadata['adduct_mass'] = adduct_mass
         self._metadata['num_features'] = len(list(meta_df.frame.drop_duplicates()))
+        
+        self._mppid = []
+        self._dt = []
+        self._num_isotopes = []
         self._intensity_org = []
         self._intensity_z = []
         self._intensity = []
         self._mass_ppm_error = []
         for feature in meta_df.itertuples():
+            self._metadata['dt_' + str(feature.frame)] = feature.dt
+            self._metadata['num_isotopes_' + str(feature.frame)] = feature.num_isotopes
             self._metadata['intensity_org_' + str(feature.frame)] = feature.intensity_org
             self._metadata['intensity_z_' + str(feature.frame)] = feature.intensity_z
             self._metadata['intensity_' + str(feature.frame)] = feature.intensity
             self._metadata['mass_error_' + str(feature.frame)] = mass_ppm_error(feature.mass, adduct_mass)
             
-            self._intensity_org.append(self._metadata['intensity_org_' + str(feature.frame)])
-            self._intensity.append(self._metadata['intensity_' + str(feature.frame)])
-            self._intensity_z.append(self._metadata['intensity_z_' + str(feature.frame)])
+            self._mppid.append(feature.mppid)
+            self._dt.append(feature.dt)
+            self._num_isotopes.append(feature.num_isotopes)
+            self._intensity_org.append(feature.intensity_org)
+            self._intensity.append(feature.intensity)
+            self._intensity_z.append(feature.intensity_z)
             self._mass_ppm_error.append(self._metadata['mass_error_' + str(feature.frame)])
         self.temperatures = meta_df.ImsTemperature.tolist()
         self._pressures = meta_df.ImsPressure.tolist()
@@ -85,6 +94,15 @@ class SteppedFieldCCS:
     @property
     def mass_ppm_error(self):
         return self._mass_ppm_error
+    @property
+    def dt(self):
+        return self._dt
+    @property
+    def num_isotopes(self):
+        return self._num_isotopes
+    @property
+    def mppid(self):
+        return self._mppid
 
     def compute(self,
                 drift_tube_length=90.33,

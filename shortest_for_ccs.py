@@ -7,6 +7,7 @@ from step_field_ccs import SteppedFieldCCS
 from collections import defaultdict
 import numpy as np
 from scipy.stats import linregress
+import networkx as nx
 
 def get_short_paths(dts_step_fields,
                     pv_step_fields,
@@ -40,9 +41,9 @@ def get_short_paths(dts_step_fields,
         pv_node_idx[cum_node_idx:cum_node_idx_next] = [pv_step_fields[i] for x in dts_step_fields[i]]
         cum_node_idx = cum_node_idx_next
 
-    print(node_idx_step_fields)
-    print(dts_node_idx)
-    print(pv_node_idx)
+    # print('node_idx_step_fields',node_idx_step_fields)
+    # print('dts_node_idx',dts_node_idx)
+    # print('pv_node_idx',pv_node_idx)
 
     # decide the direction of topological sort
     # to decide the minimum number of start nodes
@@ -71,8 +72,8 @@ def get_short_paths(dts_step_fields,
     
     # find shortest paths
     for s in start_nodes_idx:
-        path, dist = g.shortestPath(s, end_nodes_idx)
         print ("Following are shortest distances from source %d " % s)
+        path, dist = g.shortestPath(s, end_nodes_idx)
         print(path, dist)
         print(pv_node_idx[path], dts_node_idx[path])
         slope, intercept, r_value, p_value, std_err = linregress(pv_node_idx[path], dts_node_idx[path]/1000)
@@ -240,33 +241,42 @@ class Graph:
         dist[start] = 0
  
         # Process vertices in topological order
-        i = topological_sort.pop()
-        previous_weights = dict()
+        cur_i= topological_sort.pop()
+        pre_i = cur_i
+        slope_info = dict()
         # # Update distances from the start
-        for node,weight in self.graph[i]:
+        for node,weight in self.graph[cur_i]:
             # print(i, node,weight)
-            previous_weights[node] = weight
+            slope_info[node] = weight
 
         while topological_sort:
             # Get the next vertex from topological order
-            i = topological_sort.pop()
+            cur_i = topological_sort.pop()
             # Update distances of all adjacent vertices
-            # print(i, self.graph[i])
-            # print('previous_weights', previous_weights)
-            for node,weight in self.graph[i]:
-                if i in previous_weights:
-                    new_dist = abs(previous_weights[i] - weight)
-                    if dist[node] > dist[i] + new_dist:
-                        dist[node] = dist[i] + new_dist
+            print(cur_i, self.graph[cur_i])
+            print('slope_info', slope_info)
+            for node,weight in self.graph[cur_i]:
+                print(node,weight,dist)
+                if pre_i in slope_info:
+                    new_dist = abs(slope_info[pre_i] - weight)
+                    print(dist[node],dist[pre_i] + new_dist)
+                # if cur_i in slope_info:
+                #     new_dist = abs(slope_info[cur_i] - weight)
+                #     print(dist[node],dist[cur_i] + new_dist)
+
+                    if dist[node] > dist[cur_i] + new_dist:
+                        dist[node] = dist[cur_i] + new_dist
                 else:
-                    dist[node] = 0
-                previous_weights[node] = weight
+                    # dist[node] = 0
+                    dist[cur_i] = 0
+                slope_info[node] = weight
+            pre_i = cur_i
 
         # Print the calculated shortest distances
         # for i in range(self.V):
         #     print ("%d: %d" %(i, dist[i])) if dist[i] != float("Inf") else  print ("%d: Inf" %(i))
         dist_arr = np.array(dist)
-        # print(dist_arr)
+        print(dist_arr)
         # find the shortest path
         shortest_path, dist = self.get_shortest_path(start, dist_arr, end_nodes)
         return shortest_path, dist
@@ -283,21 +293,21 @@ def get_possible_ccs_values(ccs_df,
     ccs_df['pv'] = ccs_df.ImsPressure/ccs_df.ImsField
 
     frames = list(ccs_df.frame.drop_duplicates())
-    print('frames:', frames)
+    # print('frames:', frames)
     dts_step_fields = []
     pv_step_fields = []
     ccs_df_idx = []
     for frame in frames[::-1]:
-        print(frame)
+        # print(frame)
         pv = list(ccs_df[ccs_df.frame==frame]['pv'])[0]
-        print('pv:', pv)
+        # print('pv:', pv)
         pv_step_fields.append(pv)
         dts_step_fields.append(list(ccs_df[ccs_df.frame==frame]['dt']))
         ccs_df_idx.append(list(ccs_df[ccs_df.frame==frame].index))
     
-    print("dts_step_fields", dts_step_fields)
-    print("pv_step_fields", pv_step_fields)
-    print("ccs_df_idx", ccs_df_idx)
+    # print("dts_step_fields", dts_step_fields)
+    # print("pv_step_fields", pv_step_fields)
+    # print("ccs_df_idx", ccs_df_idx)
 
     assert len(dts_step_fields) == len(pv_step_fields), \
         "Please check if len(dts_step_fields) == len(pv_step_fields)"
@@ -324,51 +334,96 @@ def get_possible_ccs_values(ccs_df,
         df_node_idx[cum_node_idx:cum_node_idx_next] = ccs_df_idx[i]
         cum_node_idx = cum_node_idx_next
 
-    print(node_idx_step_fields)
-    print(dts_node_idx)
-    print(pv_node_idx)
-    print(ccs_df_idx)
+    # print(node_idx_step_fields)
+    # print(dts_node_idx)
+    # print(pv_node_idx)
+    # print(df_node_idx)
 
     # decide the direction of topological sort
     # to decide the minimum number of start nodes
     direction = 1  ## forward (first --> last)
-    iter_list = enumerate(dts_step_fields)
     start_nodes_idx = node_idx_step_fields[0]
     end_nodes_idx = node_idx_step_fields[-1]
     if (len(dts_step_fields[0]) >= len(dts_step_fields[-1])):
         direction = -1  ## backward (last --> first)
-        iter_list = reversed(list(enumerate(dts_step_fields)))
         start_nodes_idx = node_idx_step_fields[-1]
         end_nodes_idx = node_idx_step_fields[0]
-    
+    # print ("direction",direction, "start_nodes_idx", start_nodes_idx)
+    # print ("node_idx_step_fields",node_idx_step_fields)
     # define a graph
-    g = Graph(total_num_nodes)
+    DG = nx.DiGraph()
 
-    for i in range(1, len(dts_step_fields)):
-        add_edges_between_two_fields(g=g,
-                                     high_field=dts_step_fields[i-1],
-                                     low_field=dts_step_fields[i],
-                                     node_idx_for_high_field=node_idx_step_fields[i-1],
-                                     node_idx_for_low_field=node_idx_step_fields[i],
-                                     high_field_step=pv_step_fields[i-1],
-                                     low_field_step=pv_step_fields[i],
-                                     direction=direction)
+    weighted_edges = []
+    for k in range(1, len(dts_step_fields)):
+        diff_step = pv_step_fields[k] - pv_step_fields[k-1]
+        diff_step = diff_step**2
+        print(k, dts_step_fields[k-1], dts_step_fields[k])
+        
+        if direction == 1:
+            for i in range(len(dts_step_fields[k-1])):
+                for j in range(len(dts_step_fields[k])):
+                    if dts_step_fields[k][j] > dts_step_fields[k-1][i]:
+                        weighted_edges.append((node_idx_step_fields[k-1][i], node_idx_step_fields[k][j],\
+                            (dts_step_fields[k][j]-dts_step_fields[k-1][i])**2+diff_step))
+        elif direction == -1:
+            for i in range(len(dts_step_fields[k-1])):
+                for j in range(len(dts_step_fields[k])):
+                    if dts_step_fields[k][j] > dts_step_fields[k-1][i]:
+                        weighted_edges.append((node_idx_step_fields[k][j],node_idx_step_fields[k-1][i],\
+                            (dts_step_fields[k][j]-dts_step_fields[k-1][i])**2+diff_step))
     
-    # find shortest paths
+    for start, end, length in weighted_edges:
+        # You can attach any attributes you want when adding the edge
+        DG.add_edge(start, end, length=length)
+    # DG.add_weighted_edges_from(weighted_edges)
     ccs_list = []
     for s in start_nodes_idx:
-        path, dist = g.shortestPath(s, end_nodes_idx)
-        if (len(path) == 0): continue
-        print ("Following are shortest distances from source %d " % s)
-        print(path, dist)
-        print(pv_node_idx[path], dts_node_idx[path])
-        print("index of ccs_df", df_node_idx[path])
-        feature_info = ccs_df.loc[df_node_idx[path]][['intensity_org','mass','dt','mppid','intensity_z','intensity','ImsPressure','ImsTemperature','ImsField','frame']]
-        ccs = SteppedFieldCCS(feature_info, adduct_mass, old_drift_tube_length)
-        ccs.compute(drift_tube_length=drift_tube_length, neutral_mass=neutral_mass)
-        if ccs.r2 > threshold_r2:
-            ccs_list.append(ccs)
+        best_ccs_of_this_start = None
+        best_ccs_r2 = 0
+        for e in end_nodes_idx:
+            try:
+                #NOTE: a shortest path doesn't have the best correlation for linear regression
+                # path = nx.dijkstra_path(DG,s,e, weight='length')
+                # print('shortest:', path)
+                allpaths = list(nx.all_simple_paths(DG,s,e))
+                # print('all paths:', allpaths)
+                ###################### testing
+                best_r = 0
+                path = allpaths[0]
+                for p in allpaths:
+                    
+                    # leng = 0
+                    # for i in range(1, len(p)):
+                    #     _cur = p[i]
+                    #     _pre = p[i-1]
+                    #     leng += (pv_node_idx[_cur]-pv_node_idx[_pre])**2+(dts_node_idx[_cur]-dts_node_idx[_pre])**2
+                    
+                    slope, intercept, r_value, p_value, std_err = linregress(pv_node_idx[p], dts_node_idx[p])
+                    # print(p, 'r2_value:', r_value**2, 'leng:', leng)
+                    # print(p, 'r2_value:', r_value**2)
+                    if best_r < r_value:
+                        best_r = r_value
+                        path = p
+                print("BEST:", path, 'r2_value:', best_r**2)
+                ######################
+            except Exception as e:
+                continue
 
+            # print ("Following are shortest distances from source %d to end %d " % (s,e))
+            # print('path:', path)
+            # print(pv_node_idx[path], dts_node_idx[path])
+            # print("index of ccs_df", df_node_idx[path])
+            feature_info = ccs_df.loc[df_node_idx[path]][['intensity_org','mass','dt','num_isotopes','mppid','intensity_z','intensity','ImsPressure','ImsTemperature','ImsField','frame']]
+            # print(feature_info)
+            ccs = SteppedFieldCCS(feature_info, adduct_mass, old_drift_tube_length)
+            ccs.compute(drift_tube_length=drift_tube_length, neutral_mass=neutral_mass)
+            # print(ccs.to_dict())
+            # remove the redundant regression lines which share the same start nodes(features)
+            if (ccs.r2 >= threshold_r2) & (best_ccs_r2 < ccs.r2):
+                best_ccs_of_this_start = ccs
+                best_ccs_r2 = ccs.r2
+        if best_ccs_of_this_start != None:
+            ccs_list.append(best_ccs_of_this_start)
     return ccs_list
 
 if __name__ == '__main__':

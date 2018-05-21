@@ -32,6 +32,22 @@ parser.add_argument(
     '--output', type=str, default='ccs_table.tsv',
     help='Output file to save a output table')
 
+parser.add_argument(
+    '--r2_threshold', type=float, default=0.99,
+    help='threshold value for r2')
+
+parser.add_argument(
+    '--num_isotopes_threshold', type=int, default=2,
+    help='threshold value for num_isotopes')
+
+parser.add_argument(
+    '--intensity_rank_threshold', type=int, default=3,
+    help='threshold value for peak intensity rank in m/z window')
+
+parser.add_argument(
+    '--maxint', action='store_true',
+    help='select max intensive peaks for ccs computation')
+
 
 FLAGS = {}
 
@@ -58,24 +74,27 @@ def get_metadata(mfile, offset, ax=None, label=None):
     Return
         a pandas dataframe having a field information for each frame
     '''
-    metadata = pd.read_csv(mfile, sep='\t')
-    _list = list(metadata.drop_duplicates(subset='FrameMethodId').FrameId+offset-1)
-    filtered = metadata[metadata.FrameId.isin(_list)]
-    ##################################################
-    if ax is not None:
-        ax[0].plot(metadata.FrameId, metadata.ImsTemperature, label=label)
-        ax[0].scatter(filtered.FrameId, filtered.ImsTemperature, label=None)
-        ax[0].set_ylabel('Temperature (C)')
-        ax[1].plot(metadata.FrameId, metadata.ImsPressure)
-        ax[1].scatter(filtered.FrameId, filtered.ImsPressure)
-        ax[1].set_ylabel('Pressure (torr)')
-        ax[2].plot(metadata.FrameId, metadata.ImsField)
-        ax[2].scatter(filtered.FrameId, filtered.ImsField)
-        ax[2].set_ylabel('E (V/cm)')
-        ax[2].set_xlabel('Frame ID')
-    ##################################################
+    try:
+        metadata = pd.read_csv(mfile, sep='\t')
+        _list = list(metadata.drop_duplicates(subset='FrameMethodId').FrameId+offset-1)
+        filtered = metadata[metadata.FrameId.isin(_list)]
+        ##################################################
+        if ax is not None:
+            ax[0].plot(metadata.FrameId, metadata.ImsTemperature, label=label)
+            ax[0].scatter(filtered.FrameId, filtered.ImsTemperature, label=None)
+            ax[0].set_ylabel('Temperature (C)')
+            ax[1].plot(metadata.FrameId, metadata.ImsPressure)
+            ax[1].scatter(filtered.FrameId, filtered.ImsPressure)
+            ax[1].set_ylabel('Pressure (torr)')
+            ax[2].plot(metadata.FrameId, metadata.ImsField)
+            ax[2].scatter(filtered.FrameId, filtered.ImsField)
+            ax[2].set_ylabel('E (V/cm)')
+            ax[2].set_xlabel('Frame ID')
+        ##################################################
+        return filtered
+    except Exception as e:
+        return None
 
-    return filtered
 
 def get_target_info(target_list_file):
     '''read the target_list_file
@@ -160,9 +179,14 @@ def get_features_from_cef(cef, max_normalize=True):
         df['intensity_z'] = (df.intensity - df.intensity.mean())/df.intensity.std()
         if max_normalize:
             df.intensity /= df.intensity.max()
+        # num_isotopes = mspeaks.mppid.value_counts()
+        mspeaks['num_isotopes'] = mspeaks.groupby('mppid')['mppid'].transform('count')
+        # print(num_isotopes)
         mspeaks = mspeaks.drop_duplicates(subset='mppid', keep='first')
+        # mspeaks['num_isotopes'] = num_isotopes
+        
         df = pd.merge(mspeaks, df, left_on="mppid", right_on="mppid", how='inner')
-    return df, mspeaks
+    return df, mspeaks#, num_isotopes
 
 def get_adducts_colors():
     return {'[M+.]':'m',
@@ -192,10 +216,19 @@ def find_features_maxint(features, metadata, ion_mz, ppm):
     df = df.sort_values(by='frame')
     return df
 
-def find_features(features, metadata, ion_mz, ppm):
-    df = features[is_in_tolerance(features.mass, ion_mz, ppm)]
+def find_features(features, metadata, ion_mz, ppm,
+                  threshold_num_isotopes=2,
+                  threshold_intensity_rank=3):
+    df = features[is_in_tolerance(features.mass, ion_mz, ppm) & (features.num_isotopes>=threshold_num_isotopes)]
     if df.shape[0] == 0: return df
     
+    # filter out small peaks by ranking threshold
+    rankings = df.groupby('frame')['intensity_org'].rank(ascending=False)
+    df = df[rankings<=threshold_intensity_rank]
+
+    # for f in frames_too_many_features:
+    #     filter_by_intensity_rank(df, f, threshold_intensity_rank)
+
     #  if 'frame' column in metadata, delete it
     if 'frame' in metadata.columns: del metadata['frame']
 
@@ -205,7 +238,85 @@ def find_features(features, metadata, ion_mz, ppm):
     # df.to_csv("test_{0:.5f}.txt".format(ion_mz),sep="\t")
     return df
 
-def get_ccs(comp_id, target_list, config_params):
+def filter_by_intensity_rank(df, frame, threshold_intensity_rank=3):
+    temp = df[df.frame == frame]
+    
+    print(df)
+    print(frame, temp.intensity_org)
+
+    np.argsort(temp.intensity_org)
+
+def ccs_filter(ccs_list):
+    # remove the redundant regression lines which share the same start nodes(features)
+    first_peaks = []
+    last_peaks = []
+    for ccs in ccs_list:
+        first_peaks.append(int(ccs.mppid[0]))
+        last_peaks.append(int(ccs.mppid[-1]))
+    
+    ufirst_peaks = list(np.unique(first_peaks))
+    ulast_peaks = list(np.unique(last_peaks))
+    if len(ufirst_peaks) < len(ccs_list):
+        print("len(ufirst_peaks) < len(ccs_list)", len(ufirst_peaks),len(ccs_list))
+        _ccs_list = []
+        for u in ufirst_peaks:
+            idx_list = np.where(first_peaks == u)[0]
+            if idx_list.shape[0] > 1:
+                best_r2 = 0
+                best_ccs_u = None
+                for ii in idx_list:
+                    if (best_r2 < ccs_list[ii].r2):
+                        best_ccs_u = ccs_list[ii]
+                        best_r2 = ccs_list[ii].r2
+                if best_ccs_u != None:
+                    _ccs_list.append(best_ccs_u)
+            else:
+                _ccs_list.append(ccs_list[idx_list[0]])
+        return _ccs_list
+
+    elif len(ulast_peaks) < len(ccs_list):
+        print("len(ulast_peaks) < len(ccs_list)", len(ulast_peaks),len(ccs_list))
+        print("ulast_peaks", ulast_peaks)
+        print("last_peaks", last_peaks)
+        _ccs_list = []
+        for u in ulast_peaks:
+            idx_list = np.where(last_peaks == u)[0]
+            print('idx_list',u, idx_list)
+            if idx_list.shape[0] > 1:
+                best_r2 = 0
+                best_ccs_u = None
+                for ii in idx_list:
+                    if (best_r2 < ccs_list[ii].r2):
+                        best_ccs_u = ccs_list[ii]
+                        best_r2 = ccs_list[ii].r2
+                if best_ccs_u != None:
+                    _ccs_list.append(best_ccs_u)
+            else:
+                _ccs_list.append(ccs_list[idx_list[0]])
+        return _ccs_list
+    else:
+        return ccs_list
+        
+    # find the ccs values of earlist molecules
+    pass
+
+
+
+def files_not_enough(fname, config_params):
+    meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
+    if not os.path.isfile(meta_file):
+        return True
+    for step in range(config_params['num_fields']):
+        cef_file = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
+        if not os.path.isfile(cef_file):
+            return True
+    return False
+
+
+def get_ccs(comp_id, target_list, config_params,
+            threshold_r2,
+            threshold_num_isotopes,
+            threshold_intensity_rank):
     '''
     Return
         a list
@@ -237,13 +348,27 @@ def get_ccs(comp_id, target_list, config_params):
     try:
         for r, rep_file in enumerate(rep_files):
             fname = FLAGS.data_folder + '/' + rep_file.rsplit('.', 1)[0]
-            meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
+            print(files_not_enough(fname, config_params))
+            if files_not_enough(fname, config_params):
+                ccs_prop = dict()
+                tokens = comp_id.rsplit('_', 1)
+                ccs_prop['Compound_id'] = tokens[0]
+                ccs_prop['Ionization'] = tokens[1]
+                # ccs_prop['adduct'] = adduct
+                ccs_prop['replicate'] = rep_file
+                ccs_prop['name'] = list(target_info.NeutralName)[0]
+                ccs_prop['CAS'] = list(target_info.CAS)[0]
+                ccs_prop['comments'] = "couldn't find some files to compute CCS"
+                ccs_results.append(ccs_prop)
+                continue
             
+            meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
             metadata = get_metadata(meta_file, config_params['frame_offset'], ax=axis['meta'], label=rep_file)
             
             for step in range(config_params['num_fields']):
                 cef_file = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
                 _features, _ = get_features_from_cef(cef_file)
+                
                 _features['frame'] = np.ones(_features.shape[0], dtype=np.int32) * (step+1)
                 if step == 0:
                     features = _features
@@ -266,20 +391,29 @@ def get_ccs(comp_id, target_list, config_params):
                 adduct_mass = adducts[adduct]
                 start_time = time.time()
                 
-                ccs_features_within_mz = find_features(features, metadata, adduct_mass, config_params['mz_tolerance'])
+                if (FLAGS.maxint):
+                    ccs_features_within_mz = find_features_maxint(features, metadata, adduct_mass, config_params['mz_tolerance'])
+                else:
+                    ccs_features_within_mz = find_features(features, metadata, adduct_mass, config_params['mz_tolerance'],
+                                                       threshold_num_isotopes=threshold_num_isotopes,
+                                                       threshold_intensity_rank=threshold_intensity_rank)
                 if ccs_features_within_mz.shape[0] > 0:
                     ccs_list = get_possible_ccs_values(ccs_features_within_mz,
                                                        adduct_mass,
                                                        old_drift_tube_length=config_params['old_drift_tube_length'],
                                                        drift_tube_length=config_params['drift_tube_length'],
-                                                       neutral_mass=28.013,
+                                                       neutral_mass=config_params['neutral_mass'],
                                                        threshold_n_fields=3,
-                                                       threshold_r2=0.99)
+                                                       threshold_r2=threshold_r2)
+                    # filtering should be done based on ccs values of across all 3 replicates
+                    # Note: i am not sure if r2 is a good metric to do this.
+                    ccs_list = ccs_filter(ccs_list)
+
                     if len(ccs_list) > 0:
                         tokens = comp_id.rsplit('_', 1)
                         for ccs in ccs_list:
                             ccs_prop = ccs.to_dict()
-                            print("[{0}] {1} ({2}), CCS: {3}".format(comp_id, adduct, rep_file, ccs_prop['ccs']))
+                            print("[{0}] {1} ({2}), CCS: {3}({4})".format(comp_id, adduct, rep_file, ccs_prop['ccs'], ccs_prop['r2']))
                             ccs_prop['Compound_id'] = tokens[0]
                             ccs_prop['Ionization'] = tokens[1]
                             ccs_prop['adduct'] = adduct
@@ -428,7 +562,7 @@ def plot_ccs_regression_lines2(
     for ccs in ccs_list:
         prop = ccs.to_dict()
         pv = [ccs.pressures[i] / (ccs.fields[i] * drift_tube_length) for i in range(len(ccs.pressures))]
-
+        dt_diff = [abs(ccs.arrival_time[i-1]-ccs.arrival_time[i]) for i in range(1,len(ccs.arrival_time))]
         for i, f in enumerate(ccs.fields):
             axis.text((pv[i] + (p_vmax - p_vmin)/7), ccs.arrival_time[i],
                       '{0:.3f}ppm, z_score={1:.2f}'.format(ccs.mass_ppm_error[i], ccs.intensity_z[i]),
@@ -436,7 +570,7 @@ def plot_ccs_regression_lines2(
             # axis.scatter(pv[i], ccs.arrival_time[i], s=np.log(ccs.intensity_org[i]), c=color)
             axis.scatter(pv[i], ccs.arrival_time[i], s=1000*ccs.intensity[i], c=color, alpha=0.8)
         
-        axis.text(min(pv)-2*(p_vmax - p_vmin)/7, min(ccs.arrival_time)-abs(ccs.arrival_time[0]-ccs.arrival_time[1]),
+        axis.text(min(pv)-2*(p_vmax - p_vmin)/7, min(ccs.arrival_time)-0.25*min(dt_diff),
             'CCS:{0:.4f}(r2:{1:.5f})'.format(prop['ccs'], prop['r2']),
             color='r', fontsize=10)
 
@@ -491,6 +625,7 @@ def report(ccs_table, target_list):
     newcols = ['Compound_id','name','Ionization','adduct','adduct_mass','ccs_avg','ccs_rsd','ccs']+cols
     
     df = ccs_table[newcols]
+    # df = ccs_table
     df.to_csv(FLAGS.output, sep='\t')
     
 def main():
@@ -520,7 +655,10 @@ def main():
     start_time = time.time()
     for comp_id in compound_ids:
         # compute ccs for this compound
-        ccs_results += get_ccs(comp_id, target_list, config_params)
+        ccs_results += get_ccs(comp_id, target_list, config_params,
+                               threshold_r2=FLAGS.r2_threshold,
+                               threshold_num_isotopes=FLAGS.num_isotopes_threshold,
+                               threshold_intensity_rank=FLAGS.intensity_rank_threshold)
         print('[{0}] {1} sec'.format(comp_id, (time.time()-start_time)))
     print('Total time: {0} sec/compound(e.g., 3 reps)'.format((time.time()-start_time)/len(compound_ids)))
     ccs_table = pd.DataFrame(ccs_results)
@@ -528,4 +666,5 @@ def main():
 
 if __name__ == '__main__':
     FLAGS = parser.parse_args()
+    print("options:", FLAGS)
     main()
