@@ -48,6 +48,9 @@ parser.add_argument(
     '--maxint', action='store_true',
     help='select max intensive peaks for ccs computation')
 
+parser.add_argument(
+    '--format', type=str, default='cef',
+    help='file format for the features, e.g., cef or mzmine')
 
 FLAGS = {}
 
@@ -150,6 +153,7 @@ def get_adducts(exact_mass, adducts):
                 adducts2mass['neg'][name] = mass
     return adducts2mass
 
+
 def get_features_from_cef(cef, max_normalize=True):
     '''get features by reading a cef file
     '''
@@ -188,6 +192,38 @@ def get_features_from_cef(cef, max_normalize=True):
         df = pd.merge(mspeaks, df, left_on="mppid", right_on="mppid", how='inner')
     return df, mspeaks#, num_isotopes
 
+
+def get_features_from_mzmine_csv(csv, max_normalize=True):
+    df = pd.read_csv(csv)
+    if df.shape[0] == 0: return df, None
+    col_id = [c for c in df.columns if c.endswith('row ID')][0]
+    col_area = [c for c in df.columns if c.endswith('Peak area')][0]
+    col_height = [c for c in df.columns if c.endswith('Peak height')][0]
+    col_mz = [c for c in df.columns if c.endswith('Peak m/z')][0]
+    col_dt = [c for c in df.columns if c.endswith('Peak RT')][0]
+    if 'calibrated_ccs' in df.columns:
+        cols = [col_id, col_mz, col_dt, col_area, col_height, 'calibrated_ccs']
+        colnames = ['mppid', 'mass', 'dt', 'intensity', 'height', 'calibrated_ccs']
+    else:
+        cols = [col_id, col_mz, col_dt, col_area, col_height]
+        colnames = ['mppid', 'mass', 'dt', 'intensity', 'height']
+    
+    df = df[cols].copy()
+    df.columns = colnames
+    df['intensity_org'] = df.intensity
+    if df.shape[0] > 0:
+        df['intensity_z'] = (df.intensity - df.intensity.mean())/df.intensity.std()
+        if max_normalize:
+            df.intensity /= df.intensity.max()
+    return df, None
+
+
+def get_features(file, max_normalize=True, format='cef'):
+    if format=='cef': return get_features_from_cef(file, max_normalize)
+    elif format=='mzmine': return get_features_from_mzmine_csv(file, max_normalize)
+    else: print('File format: {0}. This tool doesn\'t support this file format.')
+    return None, None
+
 def get_adducts_colors():
     return {'[M+.]':'m',
             '[M+H]':'b',
@@ -219,7 +255,10 @@ def find_features_maxint(features, metadata, ion_mz, ppm):
 def find_features(features, metadata, ion_mz, ppm,
                   threshold_num_isotopes=2,
                   threshold_intensity_rank=3):
-    df = features[is_in_tolerance(features.mass, ion_mz, ppm) & (features.num_isotopes>=threshold_num_isotopes)]
+    if 'num_isotopes' in features.columns:
+        df = features[is_in_tolerance(features.mass, ion_mz, ppm) & (features.num_isotopes>=threshold_num_isotopes)]
+    else:
+        df = features[is_in_tolerance(features.mass, ion_mz, ppm)]
     if df.shape[0] == 0: return df
     
     # filter out small peaks by ranking threshold
@@ -240,10 +279,8 @@ def find_features(features, metadata, ion_mz, ppm,
 
 def filter_by_intensity_rank(df, frame, threshold_intensity_rank=3):
     temp = df[df.frame == frame]
-    
-    print(df)
-    print(frame, temp.intensity_org)
-
+    # print(df)
+    # print(frame, temp.intensity_org)
     np.argsort(temp.intensity_org)
 
 def ccs_filter(ccs_list):
@@ -301,14 +338,16 @@ def ccs_filter(ccs_list):
     pass
 
 
-
-def files_not_enough(fname, config_params):
+def files_not_enough(fname, config_params, format='cef'):
     meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
     if not os.path.isfile(meta_file):
+        print("[ERROR] a metadata file doesn't exist:", meta_file)
         return True
     for step in range(config_params['num_fields']):
-        cef_file = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
-        if not os.path.isfile(cef_file):
+        if format=='cef': ffile = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
+        else: ffile = (fname + '{0}{1:d}.mzML_c_dc_de.csv').format(config_params['suffix_raw'], (step+1))
+        if not os.path.isfile(ffile):
+            print("[ERROR] a feature file doesn't exist:", ffile)
             return True
     return False
 
@@ -331,7 +370,6 @@ def get_ccs(comp_id, target_list, config_params,
     num_reps = len(rep_files)
 
     adducts = get_adducts(list(target_info.ExactMass)[0], config_params['adducts'])[list(target_info.Ionization)[0]]
-
     ##################################################
     plt.close('all')
     figs = {}
@@ -348,8 +386,8 @@ def get_ccs(comp_id, target_list, config_params,
     try:
         for r, rep_file in enumerate(rep_files):
             fname = FLAGS.data_folder + '/' + rep_file.rsplit('.', 1)[0]
-            print(files_not_enough(fname, config_params))
-            if files_not_enough(fname, config_params):
+            
+            if files_not_enough(fname, config_params, FLAGS.format):
                 ccs_prop = dict()
                 tokens = comp_id.rsplit('_', 1)
                 ccs_prop['Compound_id'] = tokens[0]
@@ -365,24 +403,30 @@ def get_ccs(comp_id, target_list, config_params,
             meta_file = (fname + '{0}.txt').format(config_params['suffix_meta'])
             metadata = get_metadata(meta_file, config_params['frame_offset'], ax=axis['meta'], label=rep_file)
             
+            # collecting features
+            features = []
             for step in range(config_params['num_fields']):
-                cef_file = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
-                _features, _ = get_features_from_cef(cef_file)
+                if FLAGS.format=='cef': ffile = (fname + '{0}{1:d}.cef').format(config_params['suffix_raw'], (step+1))
+                else: ffile = (fname + '{0}{1:d}.mzML_c_dc_de.csv').format(config_params['suffix_raw'], (step+1))
                 
-                _features['frame'] = np.ones(_features.shape[0], dtype=np.int32) * (step+1)
-                if step == 0:
-                    features = _features
+                _features, _ = get_features(ffile, format=FLAGS.format)
+                if _features.shape[0] > 0:
+                    _features['frame'] = np.ones(_features.shape[0], dtype=np.int32) * (step+1)
+                    features.append(_features)
+                    
+                    ## draw m/z vs intensity
+                    if num_reps == 1:
+                        ax = axis['intdist'][step]
+                    else:
+                        ax = axis['intdist'][step, r]
+                    plot_intensity_distribution(_features, adducts, ax, config_params['mz_tolerance'])
+                    ax.set_xlim([0, np.log(3e6)])
                 else:
-                    features = features.append(_features)
-                
-                ## draw m/z vs intensity
-                if num_reps == 1:
-                    ax = axis['intdist'][step]
-                else:
-                    ax = axis['intdist'][step, r]
-                plot_intensity_distribution(_features, adducts, ax, config_params['mz_tolerance'])
-                ax.set_xlim([0, np.log(3e6)])
+                    print("[ERROR] This file has no features: {0}".format(ffile))
             
+            if len(features) == 0: continue
+            features = pd.concat(features)
+
             # compute CCS for each adducts
             # print(features)
             # print("features size:", features.shape)
@@ -581,17 +625,18 @@ def plot_ccs_regression_lines2(
 
 
 def plot_intensity_distribution(features, adducts_mass, ax, ppm=50):
-    colors = get_adducts_colors()
-    g = sns.kdeplot(np.log(features.intensity_org), shade=True, color="b", ax=ax)
-    ax.axvline(np.log(np.median(features.intensity_org)), linestyle=':')
-    ax.axvline(np.log(10*np.median(features.intensity_org)), linestyle=':')
-    ax.axvline(np.log(np.mean(features.intensity_org)+2*np.std(features.intensity_org)), linestyle='-.')
-    for adduct in adducts_mass:
-        sel = features[is_in_tolerance(features.mass, adducts_mass[adduct], ppm)]
-        if sel.shape[0] > 0:
-            ax.scatter(np.log(sel['intensity_org']), np.zeros(sel.shape[0]), c=colors[adduct])
-    ax.set_xlabel('log(Intensity)')
-    ax.set_ylabel('Density')
+    if features.shape[0] > 0:
+        colors = get_adducts_colors()
+        g = sns.kdeplot(np.log(features.intensity_org), shade=True, color="b", ax=ax)
+        ax.axvline(np.log(np.median(features.intensity_org)), linestyle=':')
+        ax.axvline(np.log(10*np.median(features.intensity_org)), linestyle=':')
+        ax.axvline(np.log(np.mean(features.intensity_org)+2*np.std(features.intensity_org)), linestyle='-.')
+        for adduct in adducts_mass:
+            sel = features[is_in_tolerance(features.mass, adducts_mass[adduct], ppm)]
+            if sel.shape[0] > 0:
+                ax.scatter(np.log(sel['intensity_org']), np.zeros(sel.shape[0]), c=colors[adduct])
+        ax.set_xlabel('log(Intensity)')
+        ax.set_ylabel('Density')
 
 
 def report(ccs_table, target_list):

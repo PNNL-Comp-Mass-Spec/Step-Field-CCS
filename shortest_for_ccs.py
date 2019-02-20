@@ -413,7 +413,10 @@ def get_possible_ccs_values(ccs_df,
             # print('path:', path)
             # print(pv_node_idx[path], dts_node_idx[path])
             # print("index of ccs_df", df_node_idx[path])
-            feature_info = ccs_df.loc[df_node_idx[path]][['intensity_org','mass','dt','num_isotopes','mppid','intensity_z','intensity','ImsPressure','ImsTemperature','ImsField','frame']]
+            if 'num_isotopes' in ccs_df.columns:
+                feature_info = ccs_df.loc[df_node_idx[path]][['intensity_org','mass','dt','num_isotopes','mppid','intensity_z','intensity','ImsPressure','ImsTemperature','ImsField','frame']]
+            else:
+                feature_info = ccs_df.loc[df_node_idx[path]][['intensity_org','mass','dt','mppid','intensity_z','intensity','ImsPressure','ImsTemperature','ImsField','frame']]
             # print(feature_info)
             ccs = SteppedFieldCCS(feature_info, adduct_mass, old_drift_tube_length)
             ccs.compute(drift_tube_length=drift_tube_length, neutral_mass=neutral_mass)
